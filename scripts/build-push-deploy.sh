@@ -109,15 +109,27 @@ jq -e --arg image "$image" --arg environment "$environment" '
 new_revision="$(aws ecs register-task-definition --cli-input-json "file://$RUNNER_TEMP/task-definition.json" --query 'taskDefinition.taskDefinitionArn' --output text)"
 aws ecs update-service --cluster "$cluster" --service web --task-definition "$new_revision" --query 'service.status' --output text >/dev/null
 aws ecs wait services-stable --cluster "$cluster" --services web
-service_json="$(aws ecs describe-services --cluster "$cluster" --services web --output json)"
-jq -e --arg revision "$new_revision" --argjson count "$expected_count" '
-  (.failures | length) == 0 and
-  .services[0].taskDefinition == $revision and
-  .services[0].desiredCount == $count and
-  .services[0].runningCount == $count and
-  (.services[0].deployments | length) == 1 and
-  .services[0].deployments[0].rolloutState == "COMPLETED"
-' <<<"$service_json" >/dev/null || { echo "$environment deployment did not complete" >&2; exit 1; }
+rollout_complete=false
+for _ in $(seq 1 30); do
+  service_json="$(aws ecs describe-services --cluster "$cluster" --services web --output json)"
+  if jq -e --arg revision "$new_revision" --argjson count "$expected_count" '
+    (.failures | length) == 0 and
+    .services[0].taskDefinition == $revision and
+    .services[0].desiredCount == $count and
+    .services[0].runningCount == $count and
+    (.services[0].deployments | length) == 1 and
+    .services[0].deployments[0].rolloutState == "COMPLETED"
+  ' <<<"$service_json" >/dev/null; then
+    rollout_complete=true
+    break
+  fi
+  if jq -e '.services[0].deployments[]? | select(.status == "PRIMARY" and .rolloutState == "FAILED")' <<<"$service_json" >/dev/null; then
+    echo "$environment ECS rollout failed" >&2
+    exit 1
+  fi
+  sleep 10
+done
+[[ "$rollout_complete" == true ]] || { echo "$environment deployment did not complete" >&2; exit 1; }
 
 if [[ "$environment" == prod ]]; then
   health="$(curl --retry 5 --retry-delay 3 -fsS https://aws.bandal.dev/api/health)"
