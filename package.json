@@ -1,0 +1,12 @@
+{
+  "name": "aws-ecs-fullstack-app",
+  "private": true,
+  "packageManager": "pnpm@11.27.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "start": "pnpm --filter web start",
+    "typecheck": "pnpm --filter web typecheck"
+  }
+}
