@@ -22,8 +22,9 @@ esac
 actual_account="$(aws sts get-caller-identity --query Account --output text)"
 [[ "$actual_account" == "$AWS_ACCOUNT_ID" ]] || { echo 'AWS account mismatch' >&2; exit 1; }
 
-cluster="aws-fullstack-lab-$environment"
-family="$cluster-web"
+name_prefix="aws-fullstack-lab-$environment"
+cluster="$name_prefix-cluster"
+family="$name_prefix-web"
 repository="$family"
 registry="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 image="$registry/$repository:$GITHUB_SHA"
