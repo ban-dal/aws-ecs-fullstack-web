@@ -1,5 +1,4 @@
-# 두 브랜치의 push가 각각 해당 환경의 배포를 시작한다.
-# prod-deploy 환경은 main만 허용하고 배포 전 승인을 요구한다.
+# 두 브랜치의 push가 각각 해당 환경에 배포된다. prod-deploy 환경은 main만 허용한다.
 name: Deploy app
 
 on:
