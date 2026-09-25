@@ -1,34 +1,33 @@
-# preprod 브랜치의 모든 push는 즉시 배포한다. prod는 main에서 수동 실행하고
-# prod-deploy 환경 승인을 받은 뒤 빌드·이미지 push·ECS 갱신을 한 작업에서 수행한다.
+# 두 브랜치의 push가 각각 해당 환경에 배포된다. prod-deploy 환경은 main만 허용한다.
 name: Deploy app
 
 on:
   push:
-    branches: [preprod]
-  workflow_dispatch:
+    branches: [preprod, main]
 
 permissions:
   contents: read
+
+env:
+  AWS_REGION: ap-northeast-2
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
 defaults:
   run:
     shell: bash
 
 concurrency:
-  group: app-deploy-${{ github.event_name == 'workflow_dispatch' && 'prod' || 'preprod' }}
+  group: app-deploy-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   preprod:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/preprod'
+    if: github.ref == 'refs/heads/preprod'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     permissions:
       contents: read
       id-token: write
-    env:
-      AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-2' }}
-      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,16 +39,13 @@ jobs:
       - run: scripts/build-push-deploy.sh preprod
 
   prod:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     environment: prod-deploy
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     permissions:
       contents: read
       id-token: write
-    env:
-      AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-2' }}
-      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -9,7 +9,7 @@ case "$environment" in
     expected_count=1
     ;;
   prod)
-    [[ "${GITHUB_EVENT_NAME:-}" == workflow_dispatch && "${GITHUB_REF:-}" == refs/heads/main ]] || exit 2
+    [[ "${GITHUB_EVENT_NAME:-}" == push && "${GITHUB_REF:-}" == refs/heads/main ]] || exit 2
     expected_count=2
     ;;
   *) echo 'usage: build-push-deploy.sh preprod|prod' >&2; exit 2 ;;
@@ -43,7 +43,40 @@ jq -e --argjson count "$expected_count" '
 
 current_revision="$(jq -r '.services[0].taskDefinition' <<<"$service_json")"
 current_image="$(aws ecs describe-task-definition --task-definition "$current_revision" --query 'taskDefinition.containerDefinitions[?name==`web`].image | [0]' --output text)"
+
+verify_deployment() {
+  local revision="$1" service_json rollout_complete=false
+  aws ecs wait services-stable --cluster "$cluster" --services web
+  for _ in $(seq 1 30); do
+    service_json="$(aws ecs describe-services --cluster "$cluster" --services web --output json)"
+    if jq -e --arg revision "$revision" --argjson count "$expected_count" '
+      (.failures | length) == 0 and
+      .services[0].taskDefinition == $revision and
+      .services[0].desiredCount == $count and
+      .services[0].runningCount == $count and
+      (.services[0].deployments | length) == 1 and
+      .services[0].deployments[0].rolloutState == "COMPLETED"
+    ' <<<"$service_json" >/dev/null; then
+      rollout_complete=true
+      break
+    fi
+    if jq -e '.services[0].deployments[]? | select(.status == "PRIMARY" and .rolloutState == "FAILED")' <<<"$service_json" >/dev/null; then
+      echo "$environment ECS rollout failed" >&2
+      exit 1
+    fi
+    sleep 10
+  done
+  [[ "$rollout_complete" == true ]] || { echo "$environment deployment did not complete" >&2; exit 1; }
+
+  if [[ "$environment" == prod ]]; then
+    local health
+    health="$(curl --retry 5 --retry-delay 3 -fsS https://aws.bandal.dev/api/health)"
+    jq -e '.status == "ok"' <<<"$health" >/dev/null
+  fi
+}
+
 if [[ "$current_image" == "$image" ]]; then
+  verify_deployment "$current_revision"
   echo "$environment already runs this image"
   exit 0
 fi
@@ -108,33 +141,7 @@ jq -e --arg image "$image" --arg environment "$environment" '
 
 new_revision="$(aws ecs register-task-definition --cli-input-json "file://$RUNNER_TEMP/task-definition.json" --query 'taskDefinition.taskDefinitionArn' --output text)"
 aws ecs update-service --cluster "$cluster" --service web --task-definition "$new_revision" --query 'service.status' --output text >/dev/null
-aws ecs wait services-stable --cluster "$cluster" --services web
-rollout_complete=false
-for _ in $(seq 1 30); do
-  service_json="$(aws ecs describe-services --cluster "$cluster" --services web --output json)"
-  if jq -e --arg revision "$new_revision" --argjson count "$expected_count" '
-    (.failures | length) == 0 and
-    .services[0].taskDefinition == $revision and
-    .services[0].desiredCount == $count and
-    .services[0].runningCount == $count and
-    (.services[0].deployments | length) == 1 and
-    .services[0].deployments[0].rolloutState == "COMPLETED"
-  ' <<<"$service_json" >/dev/null; then
-    rollout_complete=true
-    break
-  fi
-  if jq -e '.services[0].deployments[]? | select(.status == "PRIMARY" and .rolloutState == "FAILED")' <<<"$service_json" >/dev/null; then
-    echo "$environment ECS rollout failed" >&2
-    exit 1
-  fi
-  sleep 10
-done
-[[ "$rollout_complete" == true ]] || { echo "$environment deployment did not complete" >&2; exit 1; }
-
-if [[ "$environment" == prod ]]; then
-  health="$(curl --retry 5 --retry-delay 3 -fsS https://aws.bandal.dev/api/health)"
-  jq -e '.status == "ok"' <<<"$health" >/dev/null
-fi
+verify_deployment "$new_revision"
 {
   echo "### $environment deployment"
   echo "- commit: \`$GITHUB_SHA\`"
