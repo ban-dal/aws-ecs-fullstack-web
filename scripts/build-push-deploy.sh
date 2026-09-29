@@ -69,9 +69,34 @@ verify_deployment() {
   [[ "$rollout_complete" == true ]] || { echo "$environment deployment did not complete" >&2; exit 1; }
 
   if [[ "$environment" == prod ]]; then
-    local health
+    local health target_group_arn target_json target_ready=false
+    target_group_arn="$(jq -er '
+      .services[0].loadBalancers | if length == 1 then .[0].targetGroupArn else empty end
+    ' <<<"$service_json")" || { echo 'prod target group is missing' >&2; exit 1; }
+    for _ in $(seq 1 30); do
+      target_json="$(aws elbv2 describe-target-health --target-group-arn "$target_group_arn" --output json)"
+      if jq -e --argjson count "$expected_count" '
+        [.TargetHealthDescriptions[] | select(.TargetHealth.State == "healthy") | .Target.Id] as $ids
+        | ($ids | length) == $count and ($ids | unique | length) == $count
+      ' <<<"$target_json" >/dev/null; then
+        target_ready=true
+        break
+      fi
+      sleep 10
+    done
+    if [[ "$target_ready" != true ]]; then
+      echo 'prod ALB targets are not healthy on two distinct EC2 instances:' >&2
+      jq -r '.TargetHealthDescriptions[] | "  \(.Target.Id):\(.Target.Port) \(.TargetHealth.State)"' <<<"$target_json" >&2
+      exit 1
+    fi
+    echo 'prod ALB healthy targets (EC2:port):'
+    jq -r '.TargetHealthDescriptions[] | select(.TargetHealth.State == "healthy") | "  \(.Target.Id):\(.Target.Port)"' <<<"$target_json"
+    {
+      echo '- ALB healthy targets on distinct EC2 instances:'
+      jq -r '.TargetHealthDescriptions[] | select(.TargetHealth.State == "healthy") | "  - \(.Target.Id):\(.Target.Port)"' <<<"$target_json"
+    } >> "$GITHUB_STEP_SUMMARY"
     health="$(curl --retry 5 --retry-delay 3 -fsS https://aws.bandal.dev/api/health)"
-    jq -e '.status == "ok"' <<<"$health" >/dev/null
+    jq -e '.status == "ok" and .environment == "prod"' <<<"$health" >/dev/null
   fi
 }
 
