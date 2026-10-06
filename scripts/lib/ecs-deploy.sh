@@ -40,6 +40,49 @@ ecs_init() {
   current_image="$(image_of "$current_revision")"
 }
 
+# 자동 롤백이 끝날 때까지 기다린 뒤 원인과 롤백 후 상태를 Job Summary와 annotation에 남긴다.
+report_rollback() {
+  local revision="$1" deployment_arn deployment="" status="" reason running_revision
+  echo "$environment deployment of ${revision##*/} is rolling back; waiting for the rollback to finish" >&2
+
+  deployment_arn="$(aws ecs list-service-deployments --cluster "$cluster" --service web --output json \
+    | jq -r '.serviceDeployments | sort_by(.createdAt) | last // empty | .serviceDeploymentArn')"
+  for _ in $(seq 1 60); do
+    [[ -n "$deployment_arn" ]] || break
+    deployment="$(aws ecs describe-service-deployments --service-deployment-arns "$deployment_arn" --output json)"
+    status="$(jq -r '.serviceDeployments[0].status' <<<"$deployment")"
+    [[ "$status" == ROLLBACK_SUCCESSFUL || "$status" == ROLLBACK_FAILED || "$status" == STOPPED ]] && break
+    sleep 10
+  done
+  reason="$(jq -r '
+    .serviceDeployments[0] |
+    if .deploymentCircuitBreaker.status == "TRIGGERED" then
+      "circuit breaker (failed tasks \(.deploymentCircuitBreaker.failureCount)/\(.deploymentCircuitBreaker.threshold))"
+    elif (.alarms.triggeredAlarmNames // []) | length > 0 then
+      "CloudWatch alarm \(.alarms.triggeredAlarmNames | join(", "))"
+    else (.statusReason // "unknown") end
+  ' <<<"${deployment:-"{}"}")"
+
+  running_revision="$(aws ecs describe-services --cluster "$cluster" --services web \
+    --query 'services[0].taskDefinition' --output text)"
+  {
+    echo "### $environment deployment rolled back"
+    echo "- failed revision: \`${revision##*/}\` (\`$(image_of "$revision" | sed 's/.*://')\`)"
+    echo "- reason: $reason"
+    echo "- rollback status: \`${status:-unknown}\`"
+    echo "- running after rollback: \`${running_revision##*/}\` (\`$(image_of "$running_revision" | sed 's/.*://')\`)"
+  } >> "$GITHUB_STEP_SUMMARY"
+  echo "::error title=$environment deployment rolled back::$reason. Rollback status: ${status:-unknown}"
+
+  if [[ "$status" != ROLLBACK_SUCCESSFUL ]]; then
+    echo "::error title=$environment rollback did not succeed::Check the ECS service now."
+    return
+  fi
+  # 롤백된 revision도 정상 배포와 같은 기준으로 검증한다. 실패하면 여기서 종료한다.
+  verify_deployment "$running_revision"
+  echo "- after rollback: ECS $expected_count/$expected_count healthy" >> "$GITHUB_STEP_SUMMARY"
+}
+
 image_of() {
   aws ecs describe-task-definition --task-definition "$1" \
     --query 'taskDefinition.containerDefinitions[?name==`web`].image | [0]' --output text
@@ -47,8 +90,8 @@ image_of() {
 
 verify_deployment() {
   local revision="$1" service_json rollout_complete=false
-  aws ecs wait services-stable --cluster "$cluster" --services web
-  for _ in $(seq 1 30); do
+  # 태스크를 한 대씩 교체하고 alarm도 감시하므로 services-stable 대기(10분)보다 길게 본다.
+  for _ in $(seq 1 90); do
     service_json="$(aws ecs describe-services --cluster "$cluster" --services web --output json)"
     if jq -e --arg revision "$revision" --argjson count "$expected_count" '
       (.failures | length) == 0 and
@@ -66,8 +109,7 @@ verify_deployment() {
       .services[0].taskDefinition != $revision or
       any(.services[0].deployments[]?; .status == "PRIMARY" and .rolloutState == "FAILED")
     ' <<<"$service_json" >/dev/null; then
-      echo "$environment ECS rollout failed and was rolled back:" >&2
-      jq -r '.services[0].events[:5][] | "  \(.createdAt) \(.message)"' <<<"$service_json" >&2
+      report_rollback "$revision"
       exit 1
     fi
     sleep 10
