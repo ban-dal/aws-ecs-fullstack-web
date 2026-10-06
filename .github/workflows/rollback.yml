@@ -1,0 +1,48 @@
+# Actions 화면의 Run workflow로 prod를 ECR에 남은 이전 이미지로 되돌린다.
+# 롤백 후 main에는 문제 코드가 남으므로 revert나 수정 PR을 이어서 merge한다.
+name: Rollback prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "previous(직전 배포 취소) 또는 40자 commit SHA"
+        required: true
+        default: previous
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-2
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+defaults:
+  run:
+    shell: bash
+
+# Deploy app의 main 배포와 같은 그룹이라 동시에 실행되지 않는다.
+concurrency:
+  group: app-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prod:
+    if: github.ref == 'refs/heads/main'
+    environment: prod-deploy
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/aws-fullstack-lab-app-prod
+          aws-region: ${{ env.AWS_REGION }}
+      - env:
+          TARGET: ${{ inputs.target }}
+        run: scripts/rollback.sh "$TARGET"
