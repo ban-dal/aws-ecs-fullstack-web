@@ -4,7 +4,7 @@
 // - api: /api/backend가 500을 반환한다. health는 정상이라 5xx alarm이 되돌린다.
 export type Fault = "none" | "health" | "api";
 
-export const fault: Fault = "none";
+export const fault: Fault = "health";
 
 export function isHealthFaulty(): boolean {
   return fault === "health" && Boolean(process.env.ECS_CONTAINER_METADATA_URI_V4);
