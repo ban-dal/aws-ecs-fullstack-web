@@ -20,7 +20,7 @@ if [[ "$current_image" == "$image" ]]; then
   exit 0
 fi
 
-docker build --platform linux/arm64 -f apps/web/Dockerfile -t "web:$GITHUB_SHA" .
+docker build --platform linux/arm64 -f apps/web/Dockerfile --build-arg NEXT_DEPLOYMENT_ID="$GITHUB_SHA" -t "web:$GITHUB_SHA" .
 docker run -d --name web-check -p 3000:3000 -e APP_ENV="$environment" "web:$GITHUB_SHA" >/dev/null
 trap 'docker rm -f web-check >/dev/null 2>&1 || true' EXIT
 healthy=false

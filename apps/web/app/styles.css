@@ -93,6 +93,11 @@ tbody th { color: #24394a; font-weight: 650; }
 tbody td { color: #435563; }
 .numeric { text-align: right; font-variant-numeric: tabular-nums; }
 .empty-table { color: #84939f; }
+.version-section { margin-top: 38px; }
+.version-alert { position: fixed; z-index: 30; top: 16px; left: 50%; display: flex; align-items: center; gap: 14px; width: min(520px, calc(100% - 32px)); padding: 14px 16px; border: 1px solid #dfc996; border-radius: 7px; background: #fff9e9; color: #5f471b; box-shadow: 0 8px 24px rgba(18, 35, 55, .16); transform: translateX(-50%); }
+.version-alert p { flex: 1; margin: 0; font-size: 13px; font-weight: 700; }
+.version-alert button { min-height: 34px; padding: 0 13px; border: 1px solid #264f70; border-radius: 5px; background: #264f70; color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
+.version-alert button:focus-visible { outline: 3px solid #3c94cf; outline-offset: 2px; }
 .scope-note { margin: 14px 0 0; color: #788894; font-size: 11px; line-height: 1.6; }
 .scope-note a { color: #255e85; text-decoration: underline; text-underline-offset: 2px; }
 @media (max-width: 1120px) {

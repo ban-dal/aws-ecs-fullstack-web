@@ -5,6 +5,7 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
 COPY apps/web/package.json apps/web/package.json
 RUN pnpm install --frozen-lockfile
 COPY apps/web apps/web
+ARG NEXT_DEPLOYMENT_ID
 RUN pnpm --filter web build
 
 FROM node:22-alpine

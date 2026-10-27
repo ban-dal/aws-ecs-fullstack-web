@@ -7,5 +7,5 @@ export const dynamic = "force-dynamic";
 export default async function Home() {
   const observation = await collectRouteObservation(await headers(), "page");
 
-  return <InfrastructureDashboard initialObservation={observation} />;
+  return <InfrastructureDashboard initialObservation={observation} deploymentId={process.env.NEXT_DEPLOYMENT_ID || null} />;
 }

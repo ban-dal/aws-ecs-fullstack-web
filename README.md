@@ -22,7 +22,15 @@ pnpm dev
 | `preprod` | push | 이미지 빌드·health 확인 → preprod ECR push → ECS 서비스 배포·안정화 확인 |
 | `prod` | `main` push | 이미지 빌드·health 확인 → prod ECR push → ECS 서비스 배포·HTTPS health 확인 |
 
-이미지 태그는 정확한 commit SHA이며 환경별 ECR 저장소에 저장된다. 서비스가 꺼져 있거나 원하는 태스크 수가 맞지 않으면 배포가 실패한다. preprod는 단일 호스트의 고정 포트를 사용하므로 교체 중 잠시 중단될 수 있다. prod는 ALB 뒤의 두 호스트에 순차 배포하며, 배포가 끝나면 서로 다른 EC2 두 대의 ALB 정상 대상과 포트를 Actions 로그에 남긴다. ECS circuit breaker는 실패한 배포를 되돌린다. prod는 배포 중과 직후에 ALB 대상 5xx가 1분에 5건 이상이면 alarm으로도 되돌린다. 자동 롤백되면 Deploy app은 롤백이 끝날 때까지 기다려 롤백된 버전을 정상 배포와 같은 기준으로 검증한 뒤 실패한다. 실패한 revision, 원인(circuit breaker 또는 alarm), 롤백 후 실행 중인 commit은 run의 Job Summary와 에러 annotation에 남는다.
+이미지 태그는 정확한 commit SHA이며 환경별 ECR 저장소에 저장된다. 서비스가 꺼져 있거나 원하는 태스크 수가 맞지 않으면 배포가 실패한다. preprod는 단일 호스트의 고정 포트를 사용하므로 교체 중 잠시 중단될 수 있다. 이미지는 commit SHA를 Next.js `deploymentId`로 넣어 빌드한다. prod는 ALB 뒤의 두 호스트에 순차 배포하며, 배포가 끝나면 서로 다른 EC2 두 대의 ALB 정상 대상과 포트를 Actions 로그에 남긴다. ECS circuit breaker는 실패한 배포를 되돌린다. prod는 배포 중과 직후에 ALB 대상 5xx가 1분에 5건 이상이면 alarm으로도 되돌린다. 자동 롤백되면 Deploy app은 롤백이 끝날 때까지 기다려 롤백된 버전을 정상 배포와 같은 기준으로 검증한 뒤 실패한다. 실패한 revision, 원인(circuit breaker 또는 alarm), 롤백 후 실행 중인 commit은 run의 Job Summary와 에러 annotation에 남는다.
+
+### Server Actions 버전 검사
+
+홈 화면의 **Server Actions 버전 검사**로 배포 사이의 version skew를 확인한다. 화면을 연 뒤 새 버전이 배포되면 버튼을 눌렀을 때 오류 대신 "새 버전 앱이 배포되어 새로고침합니다" 알림과 새로고침 버튼이 나온다. 새 서버가 이전 Action ID를 모르는 경우(`UnrecognizedActionError`)와, ID가 같아 새 서버에서 실행됐지만 응답의 `deploymentId`가 화면을 연 배포와 다른 경우 모두 알림을 띄운다.
+
+1. prod 배포가 끝난 뒤 <https://aws.bandal.dev>를 열어 두고 두 버튼이 각 Action의 응답과 같은 배포 ID를 보여 주는지 확인한다.
+2. [`version-check-actions.ts`](apps/web/app/version-check-actions.ts)의 `changedAction`만 고쳐 preprod를 거쳐 `main`에 배포한다.
+3. 1의 탭을 새로고침하지 않고 두 버튼을 각각 누른다. 둘 다 알림이 떠야 하고, 새로고침하면 새 배포 ID와 수정한 응답이 보여야 한다.
 
 ### 수동 롤백
 
