@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import type { RouteObservation } from "./route-observation";
+import VersionCheck from "./version-check";
 
-type Props = { initialObservation: RouteObservation };
+type Props = { initialObservation: RouteObservation; deploymentId: string | null };
 
 function observedTime(iso: string) {
   return `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`;
@@ -25,7 +26,7 @@ function CheckRow({ label, value, confirmed }: { label: string; value: string; c
   );
 }
 
-export default function InfrastructureDashboard({ initialObservation }: Props) {
+export default function InfrastructureDashboard({ initialObservation, deploymentId }: Props) {
   const [observations, setObservations] = useState<RouteObservation[]>([initialObservation]);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +84,7 @@ export default function InfrastructureDashboard({ initialObservation }: Props) {
           <a className="active" href="#overview" aria-current="page">인프라 개요</a>
           <a href="#request-path">요청 경로</a>
           <a href="#traffic-sample">요청 기록</a>
+          <a href="#version-check">버전 검사</a>
         </nav>
         <div className="sidebar-spacer" />
         <div className="sidebar-bottom">
@@ -197,6 +199,8 @@ export default function InfrastructureDashboard({ initialObservation }: Props) {
             </div>
             <p className="scope-note">이 수치는 브라우저에서 보낸 요청의 표본입니다. 전체 ECS 태스크 수와 ALB 대상의 정상 상태는 포함하지 않습니다. <a href="/api/health">헬스 API 열기</a></p>
           </section>
+
+          <VersionCheck deploymentId={deploymentId} />
         </main>
       </div>
     </div>

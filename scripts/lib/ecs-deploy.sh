@@ -90,8 +90,9 @@ image_of() {
 
 verify_deployment() {
   local revision="$1" service_json rollout_complete=false
-  # 태스크를 한 대씩 교체하고 alarm도 감시하므로 services-stable 대기(10분)보다 길게 본다.
-  for _ in $(seq 1 90); do
+  # prod는 blue/green으로 새 태스크를 띄우고 bake time 5분 동안 alarm을 감시하므로
+  # services-stable 대기(10분)보다 길게 본다.
+  for _ in $(seq 1 120); do
     service_json="$(aws ecs describe-services --cluster "$cluster" --services web --output json)"
     if jq -e --arg revision "$revision" --argjson count "$expected_count" '
       (.failures | length) == 0 and
@@ -117,12 +118,18 @@ verify_deployment() {
   [[ "$rollout_complete" == true ]] || { echo "$environment deployment did not complete" >&2; exit 1; }
 
   if [[ "$environment" == prod ]]; then
-    local health target_group_arn target_json target_ready=false
-    target_group_arn="$(jq -er '
-      .services[0].loadBalancers | if length == 1 then .[0].targetGroupArn else empty end
-    ' <<<"$service_json")" || { echo 'prod target group is missing' >&2; exit 1; }
+    local health target_group_arns target_json target_ready=false
+    # blue/green은 두 대상 그룹을 번갈아 쓴다. 배포가 끝나면 한쪽에만 대상이 남는다.
+    target_group_arns="$(jq -er '
+      .services[0].loadBalancers
+      | if length == 1 and .[0].advancedConfiguration.alternateTargetGroupArn then
+          "\(.[0].targetGroupArn) \(.[0].advancedConfiguration.alternateTargetGroupArn)"
+        else empty end
+    ' <<<"$service_json")" || { echo 'prod blue/green target groups are missing' >&2; exit 1; }
     for _ in $(seq 1 30); do
-      target_json="$(aws elbv2 describe-target-health --target-group-arn "$target_group_arn" --output json)"
+      target_json="$(for arn in $target_group_arns; do
+        aws elbv2 describe-target-health --target-group-arn "$arn" --output json
+      done | jq -s '{TargetHealthDescriptions: map(.TargetHealthDescriptions[])}')"
       if jq -e --argjson count "$expected_count" '
         [.TargetHealthDescriptions[] | select(.TargetHealth.State == "healthy") | .Target.Id] as $ids
         | ($ids | length) == $count and ($ids | unique | length) == $count
